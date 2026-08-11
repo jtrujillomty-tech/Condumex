@@ -138,10 +138,16 @@ def armar_expediente_pdf(carpeta_factura, folio, mapeo_archivos):
     return ruta_salida
 
 def procesar_descargas_y_envios(playwright: Playwright, df_envios: pd.DataFrame, barra_progreso, texto_estado):
-    # args especiales para la nube (sin interfaz, ignorar sandbox)
-    browser = playwright.chromium.launch(headless=True, args=['--no-sandbox', '--disable-dev-shm-usage', '--force-device-scale-factor=0.8'])
-    context = browser.new_context()
-    page = context.new_page()
+    # args especiales para la nube (sin interfaz, ignorar sandbox, apagar GPU)
+    browser = playwright.chromium.launch(
+        headless=True, 
+        args=[
+            '--no-sandbox', 
+            '--disable-dev-shm-usage', 
+            '--disable-gpu', 
+            '--force-device-scale-factor=0.8'
+        ]
+    )
     
     texto_estado.info("Iniciando sesión en Facturacion1hr...")
     page.goto("https://web.aduax.com/Facturacion1hr/Account/Login")
