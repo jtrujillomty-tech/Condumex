@@ -151,7 +151,7 @@ def procesar_descargas_y_envios(playwright: Playwright, df_envios: pd.DataFrame,
     
     texto_estado.info("Iniciando sesión en Facturacion1hr...")
     page.goto("https://web.aduax.com/Facturacion1hr/Account/Login")
-    page.wait_for_timeout(1000)
+    page.wait_for_timeout(90000)
     
     page.get_by_role("textbox", name="Nombre de Usuario").click()
     page.get_by_role("textbox", name="Nombre de Usuario").fill(USUARIO_F1HR)
