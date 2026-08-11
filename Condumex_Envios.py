@@ -149,10 +149,17 @@ def procesar_descargas_y_envios(playwright: Playwright, df_envios: pd.DataFrame,
         ]
     )
     
-    texto_estado.info("Iniciando sesión en Facturacion1hr...")
-    page.goto("https://web.aduax.com/Facturacion1hr/Account/Login")
-    page.wait_for_timeout(90000)
+    # --- ¡ESTAS SON LAS LÍNEAS QUE SE HABÍAN BORRADO! ---
+    context = browser.new_context()
+    page = context.new_page()
     
+    texto_estado.info("Iniciando sesión en Facturacion1hr...")
+    
+    # El timeout va ADENTRO de los paréntesis de goto
+    page.goto("https://web.aduax.com/Facturacion1hr/Account/Login", timeout=90000)
+    page.wait_for_timeout(1000)
+    
+    # A partir de aquí sigue tu código normal...
     page.get_by_role("textbox", name="Nombre de Usuario").click()
     page.get_by_role("textbox", name="Nombre de Usuario").fill(USUARIO_F1HR)
     page.get_by_role("textbox", name="Nombre de Usuario").press("Tab")
