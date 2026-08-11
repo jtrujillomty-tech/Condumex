@@ -1,0 +1,6 @@
+streamlit
+pandas
+openpyxl
+playwright
+PyPDF2
+python-dotenv
