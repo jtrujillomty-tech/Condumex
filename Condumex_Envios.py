@@ -25,7 +25,6 @@ instalar_navegador()
 load_dotenv()
 
 # --- CONFIGURACIÓN DE CREDENCIALES ---
-# Streamlit usa st.secrets en la nube, pero fallback a os.getenv localmente
 USUARIO_F1HR = os.environ.get("FACTURACION1HR_USER") or st.secrets.get("FACTURACION1HR_USER")
 PASSWORD_F1HR = os.environ.get("FACTURACION1HR_PASS") or st.secrets.get("FACTURACION1HR_PASS")
 SMTP_USER = os.environ.get("SMTP_USER") or st.secrets.get("SMTP_USER")
@@ -50,6 +49,13 @@ CORREOS_DEFAULT = [
 ]
 
 DESTINATARIOS_POR_CLIENTE = {}
+
+def normalizar_nombre(nombre):
+    """Limpia el nombre del archivo dejando solo letras y números puros para mapeo exacto"""
+    n = str(nombre).upper()
+    n = n.replace(".PDF", "").replace(".XML", "")
+    n = n.replace("PDF_", "").replace("_PDF", "")
+    return re.sub(r'[^A-Z0-9]', '', n)
 
 def obtener_referencia_o_pedimento(carpeta_factura, ref_operativa):
     archivos = os.listdir(carpeta_factura)
@@ -104,52 +110,74 @@ def armar_expediente_pdf(carpeta_factura, folio, mapeo_archivos):
     archivos_pdf = glob.glob(os.path.join(carpeta_factura, "*.pdf"))
     agrupados = {i: [] for i in range(1, 16)}
     agrupados[99] = [] 
+    alertas_corruptos = [] # <--- Lista para recolectar los archivos dañados
     
     for ruta_pdf in archivos_pdf:
-        nombre_archivo = os.path.basename(ruta_pdf).upper()
-        if nombre_archivo == f"{folio.upper()}_COMPLETO.PDF":
+        nombre_archivo = os.path.basename(ruta_pdf)
+        if nombre_archivo.upper() == f"{folio.upper()}_COMPLETO.PDF":
             continue
-        tipo_doc = mapeo_archivos.get(nombre_archivo, "OTROS")
+            
+        # Utilizamos el ADN para un mapeo robusto (Grupo Carso, etc.)
+        clave_adn = normalizar_nombre(nombre_archivo)
+        tipo_doc = mapeo_archivos.get(clave_adn, "OTROS")
         
-        if "CTA" in tipo_doc and "GASTOS" in tipo_doc: agrupados[1].append(ruta_pdf)
-        elif "VALIDACI" in tipo_doc and "EI" in tipo_doc: agrupados[2].append(ruta_pdf)
-        elif "RENDICION" in tipo_doc: agrupados[3].append(ruta_pdf)
-        elif "SIMPLIFICADO" in tipo_doc: agrupados[4].append(ruta_pdf)
-        elif "PEDIMENTO" in tipo_doc and "SIMPLIFICADO" not in tipo_doc: agrupados[5].append(ruta_pdf)
-        elif "COMPROBADOS" in tipo_doc: agrupados[6].append(ruta_pdf)
-        elif "VALIDACI" in tipo_doc and "TERCEROS" in tipo_doc: agrupados[7].append(ruta_pdf)
-        elif "FACTURA" in tipo_doc: agrupados[8].append(ruta_pdf)
-        elif "GUIA" in tipo_doc or "BL" in tipo_doc: agrupados[9].append(ruta_pdf)
-        elif "CARTA" in tipo_doc or "IVA" in tipo_doc or "3.1.8" in tipo_doc: agrupados[10].append(ruta_pdf)
-        elif "DODA" in tipo_doc: agrupados[11].append(ruta_pdf)
-        elif "ANEXO" in tipo_doc: agrupados[12].append(ruta_pdf)
-        elif "MANIFESTACION" in tipo_doc or "VALOR" in tipo_doc: agrupados[13].append(ruta_pdf)
-        elif "CALCULO" in tipo_doc or "HOJA" in tipo_doc: agrupados[14].append(ruta_pdf)
-        else: agrupados[99].append(ruta_pdf) 
+        if tipo_doc == "OTROS":
+            n_up = nombre_archivo.upper()
+            if "CTA" in n_up and "GASTOS" in n_up: tipo_doc = "CTA. GASTOS"
+            elif "VALIDACION" in n_up and folio.upper() in n_up: tipo_doc = "VALIDACIÓN DE CFDI EI"
+            elif "VALIDACION" in n_up: tipo_doc = "VALIDACIÓN DE CFDI TERCEROS"
+            elif "RENDICION" in n_up: tipo_doc = "RENDICION GASTOS"
+            elif "SIMPLIFICADO" in n_up: tipo_doc = "PED. SIMPLIFICADO"
+            elif "PEDIMENTO" in n_up: tipo_doc = "PEDIMENTO"
+            elif "COMPROBADOS" in n_up: tipo_doc = "COMPROBADOS"
+            elif "FACTURA" in n_up: tipo_doc = "FACTURA"
+            elif "GUIA" in n_up or "BL" in n_up: tipo_doc = "GUIA O BL"
+            elif "CARTA" in n_up or "IVA" in n_up or "3.1.8" in n_up: tipo_doc = "CARTA"
+            elif "DODA" in n_up: tipo_doc = "DODA"
+            elif "ANEXO" in n_up: tipo_doc = "ANEXOS DE OPERACIONES"
+            elif "MANIFESTACION" in n_up or "VALOR" in n_up: tipo_doc = "MANIFESTACION VALOR"
+            elif "CALCULO" in n_up or "HOJA" in n_up: tipo_doc = "HOJA DE CALCULO"
+        
+        # Guardamos la tupla (ruta, tipo_doc) para poder referenciar el tipo en la alerta
+        if "CTA" in tipo_doc and "GASTOS" in tipo_doc: agrupados[1].append((ruta_pdf, tipo_doc))
+        elif "VALIDACI" in tipo_doc and "EI" in tipo_doc: agrupados[2].append((ruta_pdf, tipo_doc))
+        elif "RENDICION" in tipo_doc: agrupados[3].append((ruta_pdf, tipo_doc))
+        elif "SIMPLIFICADO" in tipo_doc: agrupados[4].append((ruta_pdf, tipo_doc))
+        elif "PEDIMENTO" in tipo_doc and "SIMPLIFICADO" not in tipo_doc: agrupados[5].append((ruta_pdf, tipo_doc))
+        elif "COMPROBADOS" in tipo_doc: agrupados[6].append((ruta_pdf, tipo_doc))
+        elif "VALIDACI" in tipo_doc and "TERCEROS" in tipo_doc: agrupados[7].append((ruta_pdf, tipo_doc))
+        elif "FACTURA" in tipo_doc: agrupados[8].append((ruta_pdf, tipo_doc))
+        elif "GUIA" in tipo_doc or "BL" in tipo_doc: agrupados[9].append((ruta_pdf, tipo_doc))
+        elif "CARTA" in tipo_doc or "IVA" in tipo_doc or "3.1.8" in tipo_doc: agrupados[10].append((ruta_pdf, tipo_doc))
+        elif "DODA" in tipo_doc: agrupados[11].append((ruta_pdf, tipo_doc))
+        elif "ANEXO" in tipo_doc: agrupados[12].append((ruta_pdf, tipo_doc))
+        elif "MANIFESTACION" in tipo_doc or "VALOR" in tipo_doc: agrupados[13].append((ruta_pdf, tipo_doc))
+        elif "CALCULO" in tipo_doc or "HOJA" in tipo_doc: agrupados[14].append((ruta_pdf, tipo_doc))
+        else: agrupados[99].append((ruta_pdf, tipo_doc)) 
             
     merger = PdfMerger()
     for categoria in sorted(agrupados.keys()):
-        for pdf in sorted(agrupados[categoria]):
-            # --- BLINDAJE ANTIBALAS PARA PDFS ---
-            # 1. Verificamos que no sea un archivo de 0 bytes
+        for pdf, tipo_documento in sorted(agrupados[categoria], key=lambda x: x[0]):
+            nombre_base = os.path.basename(pdf)
+            
+            # --- BLINDAJE ANTIBALAS CON ALERTAS PARA EL USUARIO ---
             if os.path.getsize(pdf) == 0:
-                print(f"      [!] Ignorando {os.path.basename(pdf)} porque está vacío (0 bytes).")
+                alertas_corruptos.append(f"Alerta: el archivo de tipo '{tipo_documento}' de nombre '{nombre_base}' está vacío (0 bytes), favor de agregarlo manualmente.")
                 continue
                 
-            # 2. Intentamos unirlo, si PyPDF2 falla, lo omitimos y seguimos
             try:
                 merger.append(pdf)
-            except Exception as e:
-                print(f"      [!] Saltando archivo corrupto o inválido: {os.path.basename(pdf)} - Error: {e}")
+            except Exception:
+                alertas_corruptos.append(f"Alerta: el archivo de tipo '{tipo_documento}' de nombre '{nombre_base}' está dañado, favor de agregarlo manualmente.")
                 continue
             
     ruta_salida = os.path.join(carpeta_factura, f"{folio}_Completo.pdf")
     merger.write(ruta_salida)
     merger.close()
-    return ruta_salida
+    
+    return ruta_salida, alertas_corruptos # <--- Devolvemos la ruta y las alertas
 
 def procesar_descargas_y_envios(playwright: Playwright, df_envios: pd.DataFrame, barra_progreso, texto_estado):
-    # args especiales para la nube (sin interfaz, ignorar sandbox, apagar GPU)
     browser = playwright.chromium.launch(
         headless=True, 
         args=[
@@ -160,17 +188,13 @@ def procesar_descargas_y_envios(playwright: Playwright, df_envios: pd.DataFrame,
         ]
     )
     
-    # --- ¡ESTAS SON LAS LÍNEAS QUE SE HABÍAN BORRADO! ---
     context = browser.new_context()
     page = context.new_page()
     
     texto_estado.info("Iniciando sesión en Facturacion1hr...")
-    
-    # El timeout va ADENTRO de los paréntesis de goto
     page.goto("https://web.aduax.com/Facturacion1hr/Account/Login", timeout=90000)
     page.wait_for_timeout(1000)
     
-    # A partir de aquí sigue tu código normal...
     page.get_by_role("textbox", name="Nombre de Usuario").click()
     page.get_by_role("textbox", name="Nombre de Usuario").fill(USUARIO_F1HR)
     page.get_by_role("textbox", name="Nombre de Usuario").press("Tab")
@@ -215,13 +239,11 @@ def procesar_descargas_y_envios(playwright: Playwright, df_envios: pd.DataFrame,
         carpeta_destino = os.path.join(CARPETA_BASE, nombre_cliente_carpeta, factura)
         os.makedirs(carpeta_destino, exist_ok=True)
         
-        # Actualizamos Progreso en Streamlit
         progreso_actual = (index) / total_folios
         barra_progreso.progress(progreso_actual)
         texto_estado.info(f"Procesando Folio {index+1}/{total_folios}: **{factura}**")
         
         try:
-            # 1. BÚSQUEDA Y DESCARGA
             texto_estado.write(f"🔎 Buscando factura {factura} en el portal...")
             buscador = frame_concluidas.get_by_role("searchbox", name="Buscar")
             buscador.click()
@@ -242,9 +264,11 @@ def procesar_descargas_y_envios(playwright: Playwright, df_envios: pd.DataFrame,
             
             for i in range(cantidad_filas):
                 try:
-                    nombre_arch = filas.nth(i).locator("td").nth(1).inner_text().strip().upper()
+                    nombre_arch = filas.nth(i).locator("td").nth(1).inner_text().strip()
                     tipo_doc = filas.nth(i).locator("td").nth(2).inner_text().strip().upper()
-                    mapeo_archivos[nombre_arch] = tipo_doc
+                    # Mapeo usando ADN
+                    clave_adn = normalizar_nombre(nombre_arch)
+                    mapeo_archivos[clave_adn] = tipo_doc
                 except Exception:
                     pass
             
@@ -277,23 +301,30 @@ def procesar_descargas_y_envios(playwright: Playwright, df_envios: pd.DataFrame,
             os.remove(ruta_zip)
             popup.close()
             
-            # 2. ARMADO DE PDF
+            # 2. ARMADO DE PDF Y RECOLECCIÓN DE ALERTAS
             texto_estado.write(f"📄 Uniendo PDFs para {factura}...")
-            ruta_completo = armar_expediente_pdf(carpeta_destino, factura, mapeo_archivos)
+            ruta_completo, alertas_pdf = armar_expediente_pdf(carpeta_destino, factura, mapeo_archivos)
             rutas_pdfs_completos.append(ruta_completo)
+            
+            # Mostrar las alertas inmediatamente en la pantalla de Streamlit
+            for alerta in alertas_pdf:
+                st.warning(f"⚠️ Folio {factura} - {alerta}")
             
             # 3. ENVÍO DE CORREO
             texto_estado.write(f"✉️ Enviando correo para {factura}...")
             ref_pedimento = obtener_referencia_o_pedimento(carpeta_destino, ref_operativa)
             enviar_correo_expediente(nombre_cliente_carpeta, factura, ref_pedimento, carpeta_destino)
             
-            resultados.append({"Folio": factura, "Estatus": "✅ Éxito", "Detalle": "Descargado, unido y enviado"})
+            if alertas_pdf:
+                resultados.append({"Folio": factura, "Estatus": "⚠️ Éxito Parcial", "Detalle": f"Enviado (Se omitieron {len(alertas_pdf)} archivos dañados)"})
+            else:
+                resultados.append({"Folio": factura, "Estatus": "✅ Éxito", "Detalle": "Descargado, unido y enviado"})
+                
             page.wait_for_timeout(2000)
             
         except Exception as e:
             resultados.append({"Folio": factura, "Estatus": "❌ Error", "Detalle": f"Fallo en proceso: {str(e)}"})
 
-    # Finalizar
     barra_progreso.progress(1.0)
     texto_estado.success("Proceso automatizado finalizado.")
     context.close()
@@ -313,7 +344,6 @@ st.write("Sube el archivo `Envios.xlsx` extraído del sistema. El bot se encarga
 archivo_subido = st.file_uploader("Selecciona el archivo Excel", type=["xlsx"])
 
 if archivo_subido is not None:
-    # Leemos el archivo cargado
     df = pd.read_excel(archivo_subido, dtype={"Folio Factura": str})
     df_condumex = df[df['Cliente'].isin(CLIENTES_CONDUMEX)]
     
@@ -335,11 +365,13 @@ if archivo_subido is not None:
             df_resultados = pd.DataFrame(resultados)
             
             exitosos = len(df_resultados[df_resultados['Estatus'] == '✅ Éxito'])
+            parciales = len(df_resultados[df_resultados['Estatus'] == '⚠️ Éxito Parcial'])
             errores = len(df_resultados[df_resultados['Estatus'] == '❌ Error'])
             
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             col1.metric("Cuentas Exitosas", exitosos)
-            col2.metric("Cuentas con Error", errores)
+            col2.metric("Con Alertas (Parcial)", parciales)
+            col3.metric("Cuentas con Error", errores)
             
             st.dataframe(df_resultados, use_container_width=True)
             
