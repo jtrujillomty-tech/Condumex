@@ -130,7 +130,18 @@ def armar_expediente_pdf(carpeta_factura, folio, mapeo_archivos):
     merger = PdfMerger()
     for categoria in sorted(agrupados.keys()):
         for pdf in sorted(agrupados[categoria]):
-            merger.append(pdf)
+            # --- BLINDAJE ANTIBALAS PARA PDFS ---
+            # 1. Verificamos que no sea un archivo de 0 bytes
+            if os.path.getsize(pdf) == 0:
+                print(f"      [!] Ignorando {os.path.basename(pdf)} porque está vacío (0 bytes).")
+                continue
+                
+            # 2. Intentamos unirlo, si PyPDF2 falla, lo omitimos y seguimos
+            try:
+                merger.append(pdf)
+            except Exception as e:
+                print(f"      [!] Saltando archivo corrupto o inválido: {os.path.basename(pdf)} - Error: {e}")
+                continue
             
     ruta_salida = os.path.join(carpeta_factura, f"{folio}_Completo.pdf")
     merger.write(ruta_salida)
